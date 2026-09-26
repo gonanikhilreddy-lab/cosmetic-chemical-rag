@@ -14,6 +14,7 @@ class AgentState(TypedDict, total=False):
     date_field: str | None
     date_from: str | None
     date_to: str | None
+    date_operator: str | None
     chemical_hint: str | None
     semantic_candidates: list[dict[str, Any]]
     semantic_rejected: list[dict[str, Any]]
@@ -29,3 +30,4 @@ class AgentState(TypedDict, total=False):
     model_usage: dict[str, Any]
     answer: str
     confidence: str
+    result_type: str

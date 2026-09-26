@@ -170,6 +170,14 @@ class EntityExtractionAgent:
             elif kind in matches:
                 matches.pop(kind)
 
+        if "category" not in matches and re.search(r"\bmakeup products?\b", question, re.IGNORECASE):
+            makeup_category = next(
+                (value for value in _values("category") if normalize(value) == "makeup products non permanent"),
+                None,
+            )
+            if makeup_category:
+                matches["category"] = [makeup_category]
+
         if re.search(r"\bsubcategory\b", question, re.IGNORECASE):
             hint_match = re.search(r"\b([a-z][a-z -]{1,40}?)\s+subcategory\b", question, re.IGNORECASE)
             if hint_match:

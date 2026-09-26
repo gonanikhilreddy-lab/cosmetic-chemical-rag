@@ -45,6 +45,8 @@ class AnswerSynthesizerAgent:
         intent = state["intent"]
         counts = state.get("counts", {})
         aggregate = state.get("aggregate", {})
+        records = counts.get("ingredient_records", 0)
+        products = counts.get("product_count", 0)
         if intent == "data_quality":
             stats = aggregate["dataset"]
             return (
@@ -60,13 +62,18 @@ class AnswerSynthesizerAgent:
                 f"{row['year']}: {row['product_count']:,} products, {row['ingredient_records']:,} ingredient records"
                 for row in rows
             )
+        if intent in ("company_lookup", "company_count", "company_aggregation"):
+            companies = aggregate.get("companies", [])
+            company_count = aggregate.get("company_count", len(companies))
+            return (
+                f"Found {company_count:,} companies reporting {products:,} products "
+                f"across {records:,} ingredient records."
+            )
         if intent == "compare" and aggregate.get("comparison"):
             return "; ".join(
                 f"{row['entity']}: {row['product_count']:,} products, {row['ingredient_records']:,} ingredient records"
                 for row in aggregate["comparison"]
             )
-        records = counts.get("ingredient_records", 0)
-        products = counts.get("product_count", 0)
         if records == 0:
             coverage = aggregate.get("date_coverage", {})
             date_field = state.get("date_field")
@@ -97,14 +104,40 @@ class AnswerSynthesizerAgent:
             return "No records matched in the available dataset. This does not prove that no such products exist elsewhere."
         date_field = state.get("date_field")
         date_from = state.get("date_from")
+        date_to = state.get("date_to")
+        date_operator = state.get("date_operator")
         if date_field and date_from:
-            year = date_from[:4]
             lifecycle = date_field.replace("_", " ").capitalize()
-            return f"Found {products:,} products with {lifecycle} in {year} ({records:,} ingredient records)."
+            if date_operator == "after":
+                date_text = f"after {date_from}"
+            elif date_operator == "before":
+                date_text = f"before {date_from}"
+            elif date_operator == "on":
+                date_text = f"on {date_from}"
+            elif date_operator == "through":
+                date_text = f"through {date_from}"
+            elif date_operator == "between" or date_operator == "after_before":
+                date_text = f"between {date_from} and {date_to}"
+            elif date_operator == "from":
+                date_text = f"from {date_from}"
+            else:
+                date_text = f"in {date_from[:4]}"
+            return f"Found {products:,} products with {lifecycle} {date_text} ({records:,} ingredient records)."
         return f"Found {products:,} products across {records:,} matching ingredient records."
 
     def _format_answer(self, summary_line: str, state: dict[str, Any]) -> str:
         lines = ["### Summary", summary_line]
+        if state.get("result_type") == "companies":
+            companies = state.get("aggregate", {}).get("companies", [])
+            if companies:
+                lines.extend(["", "### Reporting companies"])
+                for company in companies:
+                    lines.append(
+                        f"- **{self._display_text(company.get('CompanyName'))}**: "
+                        f"{company.get('product_count', 0):,} products, "
+                        f"{company.get('ingredient_records', 0):,} ingredient records."
+                    )
+            return "\n".join(lines)
         comparisons = state.get("aggregate", {}).get("comparison", [])
         if state.get("intent") == "compare" and comparisons:
             lines.extend(["", "### Comparison results"])

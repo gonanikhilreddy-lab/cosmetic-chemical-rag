@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.tools.structured_query import (
     chemical_breakdown,
+    company_breakdown,
     count_cosmetics,
     date_coverage,
     dataset_statistics,
@@ -39,12 +40,24 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 class StructuredQueryAgent:
-    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, limit: int) -> dict[str, Any]:
+    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, date_operator: str | None, limit: int) -> dict[str, Any]:
         if intent == "data_quality":
             return {"counts": {}, "aggregate": {"dataset": dataset_statistics()}, "evidence": []}
         filters = {ENTITY_TO_FILTER[kind]: value for kind, value in entities.items() if kind in ENTITY_TO_FILTER}
-        if date_field and date_from:
-            filters.update({"date_field": date_field, "date_from": date_from, "date_to": date_to})
+        if date_field and (date_from or date_to or date_operator == "exists"):
+            filters.update({"date_field": date_field, "date_from": date_from, "date_to": date_to, "date_operator": date_operator})
+
+        if intent in ("company_lookup", "company_count", "company_aggregation"):
+            company_rows = company_breakdown(**filters)
+            companies = _records(company_rows.head(limit))
+            aggregate = {"companies": companies, "company_count": len(company_rows)}
+            return {
+                "counts": count_cosmetics(**filters),
+                "aggregate": aggregate,
+                "evidence": [],
+                "filters": filters,
+                "result_type": "companies",
+            }
 
         if intent == "compare" and comparisons:
             kind, values = next(iter(comparisons.items()))
@@ -65,18 +78,19 @@ class StructuredQueryAgent:
         if counts["ingredient_records"] == 0 and date_field:
             non_date_filters = {
                 key: value for key, value in filters.items()
-                if key not in ("date_field", "date_from", "date_to")
+                if key not in ("date_field", "date_from", "date_to", "date_operator")
             }
             aggregate["date_coverage"] = date_coverage(date_field, **non_date_filters)
         if intent == "trend":
-            trend_filters = {key: value for key, value in filters.items() if key not in ("date_field", "date_from", "date_to")}
+            trend_filters = {key: value for key, value in filters.items() if key not in ("date_field", "date_from", "date_to", "date_operator")}
             trend = reporting_trends(
                 **trend_filters,
                 date_field=date_field or "reported",
                 date_from=date_from,
                 date_to=date_to,
+                date_operator=date_operator,
             )
             aggregate["trend"] = _records(trend)
         if intent == "summarize" or re.search(r"what chemicals|chemicals reported|which chemicals", question, re.IGNORECASE):
             aggregate["chemicals"] = _records(chemical_breakdown(**filters).head(limit))
-        return {"counts": counts, "aggregate": aggregate, "evidence": evidence, "filters": filters}
+        return {"counts": counts, "aggregate": aggregate, "evidence": evidence, "filters": filters, "result_type": "products"}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import duckdb
@@ -25,7 +25,7 @@ FILTER_COLUMNS = {
     "subcategory": "SubCategory",
 }
 DATE_COLUMNS = {
-    "reported": "InitialDateReported",
+    "reported": "MostRecentDateReported",
     "most_recent_reported": "MostRecentDateReported",
     "discontinued": "DiscontinuedDate",
     "removed": "ChemicalDateRemoved",
@@ -61,6 +61,7 @@ def _filters(
     date_field: str | None = None,
     date_from: date | str | None = None,
     date_to: date | str | None = None,
+    date_operator: str | None = None,
 ) -> tuple[list[str], list[Any]]:
     conditions: list[str] = []
     parameters: list[Any] = []
@@ -86,14 +87,56 @@ def _filters(
         column = DATE_COLUMNS[date_field]
         start = _as_date(date_from)
         end = _as_date(date_to)
-        if start is None and end is None:
-            raise ValueError("At least one of date_from or date_to is required with date_field")
-        if start is not None:
-            conditions.append(f"{column} >= ?")
+        operator = date_operator or ("exists" if date_field == "discontinued" and start is None and end is None else "range")
+        if operator == "exists":
+            conditions.append(f"{column} IS NOT NULL")
+        elif operator == "after":
+            if start is None:
+                raise ValueError("date_from is required for an after date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} > ?"])
             parameters.append(start)
-        if end is not None:
-            conditions.append(f"{column} < ?")
-            parameters.append(end)
+        elif operator == "before":
+            if start is None:
+                raise ValueError("date_from is required for a before date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} < ?"])
+            parameters.append(start)
+        elif operator == "on":
+            if start is None:
+                raise ValueError("date_from is required for an on date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} >= ?", f"{column} < ?"])
+            parameters.extend([start, start + timedelta(days=1)])
+        elif operator == "from":
+            if start is None:
+                raise ValueError("date_from is required for a from date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} >= ?"])
+            parameters.append(start)
+        elif operator == "through":
+            if start is None:
+                raise ValueError("date_from is required for a through date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} <= ?"])
+            parameters.append(start)
+        elif operator == "between":
+            if start is None or end is None:
+                raise ValueError("date_from and date_to are required for a between date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} >= ?", f"{column} <= ?"])
+            parameters.extend([start, end])
+        elif operator == "after_before":
+            if start is None or end is None:
+                raise ValueError("date_from and date_to are required for an after/before date filter")
+            conditions.extend([f"{column} IS NOT NULL", f"{column} > ?", f"{column} < ?"])
+            parameters.extend([start, end])
+        elif operator == "range":
+            if start is None and end is None:
+                raise ValueError("At least one of date_from or date_to is required with date_field")
+            conditions.append(f"{column} IS NOT NULL")
+            if start is not None:
+                conditions.append(f"{column} >= ?")
+                parameters.append(start)
+            if end is not None:
+                conditions.append(f"{column} < ?")
+                parameters.append(end)
+        else:
+            raise ValueError(f"Unsupported date_operator {operator!r}")
     elif date_from is not None or date_to is not None:
         raise ValueError("date_field is required when a date range is provided")
 
@@ -112,6 +155,7 @@ def search_cosmetics(
     date_field: str | None = None,
     date_from: date | str | None = None,
     date_to: date | str | None = None,
+    date_operator: str | None = None,
     limit: int | None = None,
 ):
     """Return distinct ingredient records matching any combination of exact filters."""
@@ -128,6 +172,7 @@ def search_cosmetics(
         date_field=date_field,
         date_from=date_from,
         date_to=date_to,
+        date_operator=date_operator,
     )
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
     limit_clause = " LIMIT ?" if limit is not None else ""
@@ -169,7 +214,7 @@ def find_by_category(primary_category: str, subcategory: str | None = None):
 
 
 def find_by_date(date_field: str, date_from: date | str, date_to: date | str):
-    return search_cosmetics(date_field=date_field, date_from=date_from, date_to=date_to)
+    return search_cosmetics(date_field=date_field, date_from=date_from, date_to=date_to, date_operator="range")
 
 
 def find_discontinued_between(date_from: date | str, date_to: date | str):
@@ -185,6 +230,7 @@ def reporting_trends(
     date_field: str = "reported",
     date_from: date | str | None = None,
     date_to: date | str | None = None,
+    date_operator: str | None = None,
 ):
     """Aggregate ingredient-record and distinct-product counts by year."""
     if date_field not in DATE_COLUMNS:
@@ -199,6 +245,7 @@ def reporting_trends(
         date_field=date_field if date_from is not None or date_to is not None else None,
         date_from=date_from,
         date_to=date_to,
+        date_operator=date_operator,
     )
     conditions.append(f"{date_column} IS NOT NULL")
     where_clause = " AND ".join(conditions)
@@ -267,6 +314,27 @@ def chemical_breakdown(**filters: Any):
         connection.close()
 
 
+def company_breakdown(**filters: Any):
+    conditions, parameters = _filters(**filters)
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+    query = f"""
+        SELECT TRIM(CompanyName) AS CompanyName,
+               COUNT(DISTINCT CDPHId) AS product_count,
+               COUNT(*) AS ingredient_records
+        FROM cosmetics{where_clause}
+        WHERE CompanyName IS NOT NULL AND TRIM(CompanyName) <> ''
+        GROUP BY TRIM(CompanyName)
+        ORDER BY CompanyName
+    """
+    if where_clause:
+        query = query.replace(f"FROM cosmetics{where_clause}\n        WHERE", f"FROM cosmetics{where_clause} AND")
+    connection = duckdb.connect(str(DB_FILE), read_only=True)
+    try:
+        return connection.execute(query, parameters).fetchdf()
+    finally:
+        connection.close()
+
+
 def dataset_statistics() -> dict[str, Any]:
     query = """
         SELECT COUNT(*) AS ingredient_records,
@@ -317,4 +385,5 @@ __all__ = [
     "find_by_brand", "find_by_product", "find_by_category", "find_by_date",
     "find_discontinued_between", "reporting_trends", "entity_values", "count_cosmetics",
     "chemical_breakdown", "dataset_statistics",
+    "company_breakdown",
 ]

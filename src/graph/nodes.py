@@ -33,6 +33,7 @@ def planner_node(state: AgentState) -> dict[str, Any]:
         "date_field": plan.date_field,
         "date_from": plan.date_from,
         "date_to": plan.date_to,
+        "date_operator": plan.date_operator,
         "warnings": plan.warnings,
         "trace": state.get("trace", []) + [f"planner: intent={plan.intent}"],
     }
@@ -46,6 +47,7 @@ def safety_question_node(state: AgentState) -> dict[str, Any]:
             "from this dataset."
         ),
         "confidence": "low",
+        "result_type": "safety_scope_response",
         "warnings": ["The disclosure dataset does not determine product safety, exposure, or individual health risk."],
         "trace": state.get("trace", []) + ["safety route: stopped before entity extraction and retrieval"],
     }
@@ -120,6 +122,7 @@ def structured_retrieval_node(state: AgentState) -> dict[str, Any]:
         date_field=state.get("date_field"),
         date_from=state.get("date_from"),
         date_to=state.get("date_to"),
+        date_operator=state.get("date_operator"),
         limit=state.get("limit", 20),
     )
     return {

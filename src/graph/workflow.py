@@ -25,7 +25,7 @@ def _step_details(name: str, state: AgentState, updates: dict[str, Any]) -> str:
     if name == "input_guardrail":
         return "Accepted dataset-related question." if not updates.get("out_of_scope") else "Rejected question outside dataset scope."
     if name == "planner":
-        return f"Intent: {updates.get('intent')}; date field: {updates.get('date_field')}; range: {updates.get('date_from')} to {updates.get('date_to', 'open')} exclusive."
+        return f"Intent: {updates.get('intent')}; date field: {updates.get('date_field')}; operator: {updates.get('date_operator')}; range: {updates.get('date_from')} to {updates.get('date_to', 'open')}."
     if name == "entity_extraction":
         plan = updates.get("query_plan", {})
         return f"Entities: {updates.get('entities', {})}; inherited: {plan.get('inherited_entities', {})}; comparisons: {updates.get('comparisons', {})}; semantic hint: {updates.get('chemical_hint') or 'none'}."
@@ -47,7 +47,7 @@ def _step_details(name: str, state: AgentState, updates: dict[str, Any]) -> str:
         ]
         return f"Fused vector K=10/BM25 K=10; reranked top K=10; kept relevance >0.70. Selected: {updates.get('entities', {}).get('chemical')}; accepted: {brief}; rejected top scores: {[(item.get('chemical_name'), item.get('relevance_score')) for item in rejected]}."
     if name == "structured_retrieval":
-        return f"Applied exact SQL filters {updates.get('filters', {})}; counts: {updates.get('counts', {})}; aggregates: {list(updates.get('aggregate', {}))}; evidence rows returned: {len(updates.get('evidence', []))}."
+        return f"Applied exact SQL filters {updates.get('filters', {})}; result type: {updates.get('result_type', 'products')}; counts: {updates.get('counts', {})}; aggregates: {list(updates.get('aggregate', {}))}; evidence rows returned: {len(updates.get('evidence', []))}."
     if name == "evidence_builder":
         ids = [(row.get("CDPHId"), row.get("ChemicalId")) for row in updates.get("evidence", [])[:5]]
         return f"Validated {len(updates.get('evidence', []))} evidence rows; sample (CDPHId, ChemicalId): {ids}."
@@ -174,4 +174,5 @@ def ask(
         "trace": result.get("trace", []),
         "step_metrics": result.get("step_metrics", []),
         "model_usage": result.get("model_usage", {}),
+        "result_type": result.get("result_type", "products"),
     }

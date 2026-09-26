@@ -111,6 +111,72 @@ class EndToEndTests(unittest.TestCase):
         result = ask("Is Titanium dioxide safe in cosmetics?", use_local_model=False)
         self.assertTrue(any("does not determine" in warning for warning in result["warnings"]))
 
+    def test_discontinued_without_range_excludes_active_products(self):
+        result = ask("Which titanium dioxide products were discontinued?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["date_operator"], "exists")
+        self.assertEqual(result["query_plan"]["filters"]["chemical_name"], "Titanium dioxide")
+        self.assertEqual(result["query_plan"]["filters"]["date_operator"], "exists")
+        self.assertTrue(all(row["DiscontinuedDate"] is not None for row in result["evidence"]))
+
+    def test_makeup_alias_is_applied_with_brand_and_chemical(self):
+        result = ask("Show me makeup products from Avon that contain titanium dioxide.", use_local_model=False)
+        self.assertEqual(result["query_plan"]["filters"]["brand_name"], "AVON")
+        self.assertEqual(result["query_plan"]["filters"]["chemical_name"], "Titanium dioxide")
+        self.assertEqual(result["query_plan"]["filters"]["primary_category"], "Makeup Products (non-permanent)")
+        self.assertTrue(all(row["PrimaryCategory"].strip() == "Makeup Products (non-permanent)" for row in result["evidence"]))
+
+    def test_acetaldehyde_returns_distinct_company_aggregation(self):
+        result = ask("How many products contain acetaldehyde, and which companies report it?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["entities"]["chemical"], "Acetaldehyde")
+        self.assertEqual(result["result_type"], "companies")
+        self.assertGreater(result["summary"]["counts"]["product_count"], 0)
+        companies = result["summary"]["aggregate"]["companies"]
+        self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
+        self.assertEqual(len({row["CompanyName"] for row in companies}), len(companies))
+        self.assertFalse(result["evidence"])
+
+    def test_cas_company_question_returns_companies_not_products(self):
+        result = ask("Which companies reported products containing CAS number 13463-67-7?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "company_lookup")
+        self.assertEqual(result["result_type"], "companies")
+        self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
+        self.assertFalse(result["evidence"])
+
+    def test_company_count_question_returns_distinct_count(self):
+        result = ask("How many companies reported products containing CAS number 13463-67-7?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "company_count")
+        self.assertEqual(result["result_type"], "companies")
+        self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
+        self.assertGreaterEqual(
+            result["summary"]["aggregate"]["company_count"],
+            len(result["summary"]["aggregate"]["companies"]),
+        )
+        self.assertFalse(result["evidence"])
+
+    def test_reported_after_uses_strict_lower_bound(self):
+        result = ask("Find all products containing titanium dioxide that were reported after January 1, 2020.", use_local_model=False)
+        plan = result["query_plan"]
+        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("after", "2020-01-01", None))
+        self.assertTrue(all(row["MostRecentDateReported"] > "2020-01-01" for row in result["evidence"]))
+
+    def test_reported_before_uses_strict_upper_bound(self):
+        result = ask("Find all products containing titanium dioxide that were reported before January 1, 2020.", use_local_model=False)
+        plan = result["query_plan"]
+        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("before", "2020-01-01", None))
+        self.assertTrue(all(row["MostRecentDateReported"] < "2020-01-01" for row in result["evidence"]))
+
+    def test_reported_during_year_uses_half_open_range(self):
+        result = ask("Find all products containing titanium dioxide that were reported during 2020.", use_local_model=False)
+        plan = result["query_plan"]
+        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("range", "2020-01-01", "2021-01-01"))
+        self.assertTrue(all("2020-01-01" <= row["MostRecentDateReported"] < "2021-01-01" for row in result["evidence"]))
+
+    def test_reported_between_uses_inclusive_bounds(self):
+        result = ask("Find all products containing titanium dioxide that were reported between January 1, 2020 and December 31, 2020.", use_local_model=False)
+        plan = result["query_plan"]
+        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("between", "2020-01-01", "2020-12-31"))
+        self.assertTrue(all("2020-01-01" <= row["MostRecentDateReported"] <= "2020-12-31" for row in result["evidence"]))
+
     def test_execution_trace_has_latency_and_work_for_each_step(self):
         result = ask("Which products contain CAS 75-07-0?", limit=1, use_local_model=False)
         names = [step["step"] for step in result["step_metrics"]]
