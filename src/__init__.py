@@ -1,0 +1,1 @@
+"""Cosmetics chemical disclosure assistant package."""

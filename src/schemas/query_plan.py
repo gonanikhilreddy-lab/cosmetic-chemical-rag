@@ -1,0 +1,16 @@
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class QueryPlan(BaseModel):
+    intent: Literal["lookup", "list", "compare", "summarize", "trend", "data_quality"] = "lookup"
+    entities: dict[str, str] = Field(default_factory=dict)
+    inherited_entities: dict[str, str] = Field(default_factory=dict)
+    comparisons: dict[str, list[str]] = Field(default_factory=dict)
+    date_field: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    retrieval_mode: Literal["structured", "semantic", "hybrid", "clarify", "out_of_scope"] = "structured"
+    inherited_date_constraint: bool = False
+    warnings: list[str] = Field(default_factory=list)
