@@ -11,12 +11,28 @@ DATE_PHRASES = (
     ("reported", "reported"),
 )
 YEAR_PATTERN = re.compile(r"\b(19\d{2}|20\d{2})\b")
+SAFETY_TERMS = (
+    "safe",
+    "safety",
+    "pregnancy",
+    "pregnant",
+    "side effect",
+    "toxic",
+    "harmful",
+    "health effect",
+    "cancer",
+    "allergy",
+    "safe for children",
+    "breastfeeding",
+)
 
 
 class PlannerAgent:
     def plan(self, question: str) -> QueryPlan:
         text = question.lower()
-        if any(term in text for term in ("data quality", "missing values", "dataset stats", "how many rows", "dataset size")):
+        if any(term in text for term in SAFETY_TERMS):
+            intent = "safety_question"
+        elif any(term in text for term in ("data quality", "missing values", "dataset stats", "how many rows", "dataset size")):
             intent = "data_quality"
         elif any(term in text for term in ("compare", "comparison", "versus", " vs ")):
             intent = "compare"

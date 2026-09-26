@@ -38,6 +38,19 @@ def planner_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+def safety_question_node(state: AgentState) -> dict[str, Any]:
+    return {
+        "answer": (
+            "The dataset can identify products that report a chemical, but it does not contain "
+            "pregnancy-safety or clinical evidence. Therefore, pregnancy safety cannot be determined "
+            "from this dataset."
+        ),
+        "confidence": "low",
+        "warnings": ["The disclosure dataset does not determine product safety, exposure, or individual health risk."],
+        "trace": state.get("trace", []) + ["safety route: stopped before entity extraction and retrieval"],
+    }
+
+
 def entity_extraction_node(state: AgentState) -> dict[str, Any]:
     plan = QueryPlan.model_validate(state["query_plan"])
     plan, hint, needs_clarification = entity_extractor.extract(

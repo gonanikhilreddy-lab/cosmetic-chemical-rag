@@ -14,6 +14,7 @@ from src.graph.nodes import (
     output_guardrail_node,
     planner_node,
     route_node,
+    safety_question_node,
     semantic_retrieval_node,
     structured_retrieval_node,
 )
@@ -81,6 +82,8 @@ def _route_after_input(state: AgentState) -> str:
 
 
 def _route_after_plan(state: AgentState) -> str:
+    if state.get("intent") == "safety_question":
+        return "safety_question"
     return str(state.get("retrieval_mode", "structured"))
 
 
@@ -89,6 +92,7 @@ def build_workflow():
     graph = StateGraph(AgentState)
     graph.add_node("input_guardrail", _instrument("input_guardrail", input_guardrail))
     graph.add_node("planner", _instrument("planner", planner_node))
+    graph.add_node("safety_question", _instrument("safety_question", safety_question_node))
     graph.add_node("entity_extraction", _instrument("entity_extraction", entity_extraction_node))
     graph.add_node("router", _instrument("router", route_node))
     graph.add_node("semantic_retrieval", _instrument("semantic_retrieval", semantic_retrieval_node))
@@ -105,7 +109,11 @@ def build_workflow():
         _route_after_input,
         {"planner": "planner", "out_of_scope": "out_of_scope"},
     )
-    graph.add_edge("planner", "entity_extraction")
+    graph.add_conditional_edges(
+        "planner",
+        _route_after_plan,
+        {"safety_question": "safety_question", "structured": "entity_extraction"},
+    )
     graph.add_edge("entity_extraction", "router")
     graph.add_conditional_edges(
         "router",
@@ -124,7 +132,7 @@ def build_workflow():
     )
     graph.add_edge("structured_retrieval", "evidence_builder")
     graph.add_edge("evidence_builder", "answer_synthesizer")
-    for node in ("answer_synthesizer", "clarification", "out_of_scope"):
+    for node in ("answer_synthesizer", "clarification", "out_of_scope", "safety_question"):
         graph.add_edge(node, "output_guardrail")
     graph.add_edge("output_guardrail", END)
     return graph.compile()

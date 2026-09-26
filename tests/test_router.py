@@ -24,6 +24,14 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(result["confidence"], "needs_clarification")
         self.assertFalse(result["evidence"])
 
+    def test_safety_question_stops_before_retrieval(self):
+        result = ask("Is Titanium dioxide safe to use during pregnancy?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "safety_question")
+        self.assertFalse(result["evidence"])
+        self.assertIn("pregnancy-safety or clinical evidence", result["answer"])
+        steps = [step["step"] for step in result["step_metrics"]]
+        self.assertEqual(steps, ["input_guardrail", "planner", "safety_question", "output_guardrail"])
+
 
 if __name__ == "__main__":
     unittest.main()

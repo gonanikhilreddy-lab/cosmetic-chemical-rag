@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class QueryPlan(BaseModel):
-    intent: Literal["lookup", "list", "compare", "summarize", "trend", "data_quality"] = "lookup"
+    intent: Literal["lookup", "list", "compare", "summarize", "trend", "data_quality", "safety_question"] = "lookup"
     entities: dict[str, str] = Field(default_factory=dict)
     inherited_entities: dict[str, str] = Field(default_factory=dict)
     comparisons: dict[str, list[str]] = Field(default_factory=dict)
