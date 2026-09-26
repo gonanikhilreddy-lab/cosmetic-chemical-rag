@@ -55,15 +55,17 @@ def ollama_status() -> tuple[bool, list[str]]:
 
 
 available, installed_models = ollama_status()
+model_present = any(name.split(":")[0] == OLLAMA_MODEL.split(":")[0] for name in installed_models)
 
 with st.sidebar:
     st.markdown("<div class='eyebrow' style='color:#91c7ae'>LOCAL DISCLOSURE POC</div>", unsafe_allow_html=True)
     st.markdown("### Runtime")
     if available:
         st.success("Ollama is reachable")
+        if not model_present:
+            st.error(f"Configured model {OLLAMA_MODEL} is not installed. Run `ollama pull {OLLAMA_MODEL}`.")
     else:
         st.warning("Ollama is offline. Structured and vector search still work; answers use deterministic synthesis.")
-    model_present = any(name.split(":")[0] == OLLAMA_MODEL.split(":")[0] for name in installed_models)
     st.caption(f"Answer model: {OLLAMA_MODEL} · {'ready' if model_present else 'not listed'}")
     st.caption("Embeddings: nomic-embed-text · local")
     use_local_model = st.toggle("Use local model for summaries", value=available and model_present)
@@ -74,10 +76,12 @@ with st.sidebar:
     st.caption("DuckDB facts · Qdrant vectors + BM25")
     if st.button("Clear conversation", width="stretch"):
         st.session_state["chat_history"] = []
+        st.session_state["active_turn_index"] = -1
         st.session_state.pop("pending_question", None)
         st.rerun()
 
 st.session_state.setdefault("chat_history", [])
+st.session_state.setdefault("active_turn_index", len(st.session_state["chat_history"]) - 1)
 
 st.markdown("<div class='eyebrow'>CALIFORNIA SAFE COSMETICS PROGRAM · LOCAL RESEARCH CONSOLE</div>", unsafe_allow_html=True)
 st.markdown("<div class='app-title'>Chemical disclosure search</div>", unsafe_allow_html=True)
@@ -137,6 +141,7 @@ if submitted:
                 )
                 history.append({"question": question, "result": result})
                 st.session_state["chat_history"] = history[-10:]
+                st.session_state["active_turn_index"] = len(st.session_state["chat_history"]) - 1
             except Exception as error:
                 st.error(f"Search failed: {type(error).__name__}: {error}")
 
@@ -147,7 +152,7 @@ for turn_index, turn in enumerate(st.session_state["chat_history"]):
     title_text = turn["question"]
     if len(title_text) > 84:
         title_text = title_text[:81].rstrip() + "..."
-    with st.expander(f"Question {turn_index + 1} · {title_text}", expanded=turn_index == len(st.session_state["chat_history"]) - 1):
+    with st.expander(f"Question {turn_index + 1} · {title_text}", expanded=turn_index == st.session_state["active_turn_index"]):
         st.markdown(
             f"<div class='question-highlight'><strong>QUESTION {turn_index + 1}</strong>{html.escape(turn['question'])}</div>",
             unsafe_allow_html=True,
@@ -203,7 +208,7 @@ for turn_index, turn in enumerate(st.session_state["chat_history"]):
             else:
                 st.info("No row-level evidence was returned for this turn.")
 
-        with st.expander("How this answer was derived", expanded=turn_index == len(st.session_state["chat_history"]) - 1):
+        with st.expander("How this answer was derived", expanded=turn_index == st.session_state["active_turn_index"]):
             st.markdown("**Query plan**")
             st.json({
                 "query_plan": plan,

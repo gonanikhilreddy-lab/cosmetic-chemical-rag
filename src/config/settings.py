@@ -12,7 +12,7 @@ CSV_PATH = RAW_DATA_DIR / "interviewtestdataset.csv"
 DATABASE_PATH = PROCESSED_DATA_DIR / "cosmetics.duckdb"
 VECTORSTORE_PATH = PROJECT_ROOT / os.getenv("VECTORSTORE_PATH", "vectorstore/chroma")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b")
 OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 
 load_dotenv(PROJECT_ROOT / ".env")

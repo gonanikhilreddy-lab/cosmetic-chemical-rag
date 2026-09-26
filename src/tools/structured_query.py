@@ -49,6 +49,46 @@ def _as_date(value: date | str | None) -> date | None:
     return date.fromisoformat(value)
 
 
+def date_predicate(
+    date_field: str | None,
+    date_from: date | str | None,
+    date_to: date | str | None,
+    date_operator: str | None,
+) -> str | None:
+    if date_field is None:
+        return None
+    if date_field not in DATE_COLUMNS:
+        raise ValueError(f"Unsupported date_field {date_field!r}")
+    column = DATE_COLUMNS[date_field]
+    start = _as_date(date_from)
+    end = _as_date(date_to)
+    operator = date_operator or ("exists" if date_field == "discontinued" and start is None and end is None else "range")
+    literal_start = f"DATE '{start.isoformat()}'" if start else None
+    literal_end = f"DATE '{end.isoformat()}'" if end else None
+    if operator == "exists":
+        return f"{column} IS NOT NULL"
+    if operator == "after":
+        return f"{column} IS NOT NULL AND {column} > {literal_start}"
+    if operator == "before":
+        return f"{column} IS NOT NULL AND {column} < {literal_start}"
+    if operator == "from":
+        return f"{column} IS NOT NULL AND {column} >= {literal_start}"
+    if operator == "through":
+        return f"{column} IS NOT NULL AND {column} <= {literal_start}"
+    if operator == "on":
+        return f"{column} IS NOT NULL AND {column} >= {literal_start} AND {column} < {literal_end}"
+    if operator == "range":
+        parts = [f"{column} IS NOT NULL"]
+        if literal_start:
+            parts.append(f"{column} >= {literal_start}")
+        if literal_end:
+            parts.append(f"{column} < {literal_end}")
+        return " AND ".join(parts)
+    if operator == "after_before":
+        return f"{column} IS NOT NULL AND {column} > {literal_start} AND {column} < {literal_end}"
+    raise ValueError(f"Unsupported date_operator {operator!r}")
+
+
 def _filters(
     *,
     cas_number: str | None = None,
@@ -62,6 +102,7 @@ def _filters(
     date_from: date | str | None = None,
     date_to: date | str | None = None,
     date_operator: str | None = None,
+    require_discontinued: bool = False,
 ) -> tuple[list[str], list[Any]]:
     conditions: list[str] = []
     parameters: list[Any] = []
@@ -77,8 +118,11 @@ def _filters(
     for filter_name, value in values.items():
         if value is not None:
             column = FILTER_COLUMNS[filter_name]
-            conditions.append(f"LOWER(TRIM({column})) = LOWER(TRIM(?))")
+            conditions.append(f"LOWER(TRIM(REPLACE({column}, '\ufffd', ''))) = LOWER(TRIM(REPLACE(?, '\ufffd', '')))")
             parameters.append(value)
+
+    if require_discontinued:
+        conditions.append("DiscontinuedDate IS NOT NULL")
 
     if date_field is not None:
         if date_field not in DATE_COLUMNS:
@@ -281,6 +325,20 @@ def entity_values(entity_type: str) -> list[str]:
         connection.close()
 
 
+def cas_values_for_chemical(chemical_name: str) -> list[str]:
+    connection = duckdb.connect(str(DB_FILE), read_only=True)
+    try:
+        rows = connection.execute(
+            "SELECT DISTINCT TRIM(CasNumber) FROM cosmetics "
+            "WHERE LOWER(TRIM(REPLACE(ChemicalName, '\ufffd', ''))) = LOWER(TRIM(REPLACE(?, '\ufffd', ''))) "
+            "AND CasNumber IS NOT NULL AND TRIM(CasNumber) <> '' ORDER BY 1",
+            [chemical_name],
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+    finally:
+        connection.close()
+
+
 def count_cosmetics(**filters: Any) -> dict[str, int]:
     conditions, parameters = _filters(**filters)
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
@@ -384,6 +442,6 @@ __all__ = [
     "DB_FILE", "search_cosmetics", "find_by_cas", "find_by_chemical", "find_by_company",
     "find_by_brand", "find_by_product", "find_by_category", "find_by_date",
     "find_discontinued_between", "reporting_trends", "entity_values", "count_cosmetics",
-    "chemical_breakdown", "dataset_statistics",
+    "chemical_breakdown", "cas_values_for_chemical", "date_predicate", "dataset_statistics",
     "company_breakdown",
 ]

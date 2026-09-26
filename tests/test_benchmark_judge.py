@@ -8,7 +8,7 @@ class BenchmarkJudgeTests(unittest.TestCase):
     def test_judge_prompt_does_not_receive_gold_labels(self):
         class FakeResponse:
             content = '{"relevant_ids":[0]}'
-            response_metadata = {"model": "qwen2.5:1.5b", "prompt_eval_count": 10, "eval_count": 2}
+            response_metadata = {"model": "qwen3:4b", "prompt_eval_count": 10, "eval_count": 2}
 
         class FakeClient:
             def close(self):

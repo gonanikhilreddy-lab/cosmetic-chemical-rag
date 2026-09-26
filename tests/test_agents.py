@@ -17,10 +17,14 @@ class AgentTests(unittest.TestCase):
         before = PlannerAgent().plan("products reported before January 1, 2020")
         during = PlannerAgent().plan("products reported during 2020")
         between = PlannerAgent().plan("products reported between January 1, 2020 and December 31, 2020")
+        from_year = PlannerAgent().plan("products reported from 2019")
+        through_year = PlannerAgent().plan("products reported through 2019")
         self.assertEqual((after.date_operator, after.date_from, after.date_to), ("after", "2020-01-01", None))
         self.assertEqual((before.date_operator, before.date_from, before.date_to), ("before", "2020-01-01", None))
         self.assertEqual((during.date_operator, during.date_from, during.date_to), ("range", "2020-01-01", "2021-01-01"))
         self.assertEqual((between.date_operator, between.date_from, between.date_to), ("between", "2020-01-01", "2020-12-31"))
+        self.assertEqual((from_year.date_operator, from_year.date_from, from_year.date_to), ("from", "2019-01-01", None))
+        self.assertEqual((through_year.date_operator, through_year.date_from, through_year.date_to), ("through", "2019-12-31", None))
 
     def test_entity_extractor_resolves_exact_cas(self):
         question = "Which products contain CAS 75-07-0?"

@@ -133,7 +133,7 @@ The root `structured_query.py` remains a compatibility shim; new imports should 
 
 ## Local models and setup
 
-The default models are `qwen2.5:1.5b` for synthesis and `nomic-embed-text` for embeddings. Both run locally through Ollama. They are installed on the development machine but are not bundled in this repository.
+The default models are `qwen3:4b` for synthesis and `nomic-embed-text` for embeddings. Both run locally through Ollama. They are not bundled in this repository.
 
 Install project packages in Python 3.11+:
 
@@ -145,7 +145,7 @@ py -3.11 -m venv .venv
 Install Ollama for Windows, then fetch models if they are not already present:
 
 ```powershell
-ollama pull qwen2.5:1.5b
+ollama pull qwen3:4b
 ollama pull nomic-embed-text
 ```
 

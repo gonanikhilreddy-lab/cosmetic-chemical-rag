@@ -5,7 +5,7 @@ from rapidfuzz import fuzz, process
 
 from src.agents.planner import YEAR_PATTERN
 from src.schemas.query_plan import QueryPlan
-from src.tools.structured_query import entity_values
+from src.tools.structured_query import cas_values_for_chemical, entity_values
 
 
 ENTITY_TYPES = (
@@ -13,7 +13,7 @@ ENTITY_TYPES = (
 )
 CAS_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
 FOLLOW_UP_PATTERN = re.compile(
-    r"^\s*(?:what\s+about|how\s+about|and\b|also\b|same\b|those\b|them\b|that\b|it\b|now\b|then\b|what\s+else\b|which\s+ones\b|how\s+many\b)",
+    r"^\s*(?:what\s+about|how\s+about|and\b|also\b|same\b|those\b|them\b|that\b|it\b|now\b|then\b|what\s+else\b|which\s+ones\b|which\s+of\s+(?:those|them|these)\b|how\s+many\s+of\s+(?:those|them|these)\b)",
     re.IGNORECASE,
 )
 MARKERS = {
@@ -28,7 +28,11 @@ MARKERS = {
 
 
 def normalize(value: str) -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.replace("\ufffd", " ").lower()).split())
+
+
+def canonical_value(value: str) -> str:
+    return " ".join(value.replace("\ufffd", " ").split()).strip()
 
 
 @lru_cache(maxsize=None)
@@ -52,7 +56,7 @@ class EntityExtractionAgent:
             ]
             unique: dict[str, str] = {}
             for value in found:
-                unique.setdefault(normalize(value), value)
+                unique.setdefault(normalize(value), canonical_value(value))
             if unique:
                 matches[kind] = sorted(unique.values(), key=lambda value: len(normalize(value)), reverse=True)
 
@@ -251,30 +255,38 @@ class EntityExtractionAgent:
                     plan.warnings.append(f"Several {kind} values matched; using {values[0]!r}.")
 
         prior_plan = (conversation_context or {}).get("query_plan", {})
-        if prior_plan and FOLLOW_UP_PATTERN.search(question):
+        context_reference = None
+        if re.search(r"\b(?:this|that)\s+(?:chemical|ingredient)|\b(?:this|that)\s+cas(?:\s+number)?\b|\bit\b", question, re.IGNORECASE):
+            context_reference = "chemical"
+        elif re.search(r"\b(?:those|these)\s+companies\b|\bsame\s+companies\b|\bwhich\s+companies\s+are\s+(?:they|those)\b", question, re.IGNORECASE):
+            context_reference = "company"
+        elif re.search(r"\b(?:those|these)\s+products\b|\b(?:which|how\s+many)\s+of\s+(?:those|them|these)\b|\bthem\b|\bsame\s+product\b", question, re.IGNORECASE):
+            context_reference = "product_context"
+        elif prior_plan and re.match(r"^\s*(?:what\s+about|how\s+about|same)\b", question, re.IGNORECASE):
+            context_reference = "product_context"
+
+        if prior_plan and context_reference:
+            plan.context_reference = context_reference
+            if re.search(r"\bhow\s+many\s+of\s+(?:those|them|these)\b", question, re.IGNORECASE):
+                plan.intent = "product_count"
+                plan.aggregation_target = "products"
+                plan.distinct = True
+                plan.count = True
+            allowed_kinds = {
+                "chemical": {"chemical", "cas"},
+                "company": {"company", "chemical", "cas"},
+                "product_context": {"company", "brand", "product", "category", "subcategory", "chemical", "cas"},
+            }[context_reference]
             for kind, value in prior_plan.get("entities", {}).items():
+                if kind not in allowed_kinds:
+                    continue
                 if kind not in entities and kind not in comparisons:
                     entities[kind] = value
                     plan.inherited_entities[kind] = value
 
-            prior_filters = prior_plan.get("filters", {})
-            prior_date_field = prior_plan.get("date_field") or prior_filters.get("date_field")
-            prior_date_from = prior_plan.get("date_from") or prior_filters.get("date_from")
-            prior_date_to = prior_plan.get("date_to") or prior_filters.get("date_to")
-            years = [int(value) for value in YEAR_PATTERN.findall(question)]
-            if plan.date_field is None and prior_date_field:
-                plan.date_field = prior_date_field
-                plan.date_from = f"{min(years)}-01-01" if years else prior_date_from
-                plan.date_to = f"{max(years) + 1}-01-01" if years else prior_date_to
-                plan.inherited_date_constraint = not years and bool(prior_date_from)
-            elif plan.date_field and plan.date_from is None and plan.date_field == prior_date_field:
-                plan.date_from = prior_date_from
-                plan.date_to = prior_date_to
-                plan.inherited_date_constraint = bool(prior_date_from)
-
-            if plan.inherited_entities or plan.inherited_date_constraint:
+            if plan.inherited_entities:
                 plan.warnings.append(
-                    "Follow-up context applied from the previous turn; explicit entities and dates in this question take precedence."
+                    f"Follow-up context applied from the explicit {context_reference} reference; inherited fields: {', '.join(plan.inherited_entities)}."
                 )
 
         ambiguous = []
@@ -320,6 +332,11 @@ class EntityExtractionAgent:
                     chemical_hint = None
 
         plan.entities = entities
+        plan.context_reference = context_reference
+        if "chemical" in entities and "cas" not in entities:
+            chemical_cas = cas_values_for_chemical(entities["chemical"])
+            if len(chemical_cas) == 1:
+                entities["cas"] = chemical_cas[0]
         plan.comparisons = comparisons
         if ambiguous:
             plan.warnings.append("The name can refer to multiple entity types: " + "; ".join(ambiguous))

@@ -3,7 +3,7 @@ import re
 from src.tools.structured_query import entity_values
 
 DATASET_TERMS = re.compile(
-    r"cosmetic|product|chemical|ingredient|brand|company|manufacturer|cas\b|category|subcategory|"
+    r"cosmetic|products?|chemicals?|ingredients?|brands?|compan(?:y|ies)|manufacturers?|cas\b|categories?|subcategories?|"
     r"reported|reporting|discontinued|reformulat|removed|dataset|data quality|how many rows",
     re.IGNORECASE,
 )

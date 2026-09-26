@@ -34,6 +34,10 @@ def planner_node(state: AgentState) -> dict[str, Any]:
         "date_from": plan.date_from,
         "date_to": plan.date_to,
         "date_operator": plan.date_operator,
+        "aggregation_target": plan.aggregation_target,
+        "distinct": plan.distinct,
+        "count": plan.count,
+        "require_discontinued": plan.require_discontinued,
         "warnings": plan.warnings,
         "trace": state.get("trace", []) + [f"planner: intent={plan.intent}"],
     }
@@ -65,7 +69,10 @@ def entity_extraction_node(state: AgentState) -> dict[str, Any]:
         "chemical_hint": hint,
         "needs_clarification": needs_clarification,
         "warnings": plan.warnings,
-        "trace": state.get("trace", []) + ["entity extraction: resolved exact names, CAS, categories, and date constraints"],
+        "trace": state.get("trace", []) + [
+            "entity extraction: resolved exact names, CAS, categories, and date constraints"
+            + (f"; inherited {plan.context_reference}: {list(plan.inherited_entities)}" if plan.context_reference else "; standalone context")
+        ],
     }
 
 
@@ -123,6 +130,8 @@ def structured_retrieval_node(state: AgentState) -> dict[str, Any]:
         date_from=state.get("date_from"),
         date_to=state.get("date_to"),
         date_operator=state.get("date_operator"),
+        output_targets=QueryPlan.model_validate(state["query_plan"]).output_targets,
+        require_discontinued=QueryPlan.model_validate(state["query_plan"]).require_discontinued,
         limit=state.get("limit", 20),
     )
     return {

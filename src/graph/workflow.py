@@ -47,7 +47,7 @@ def _step_details(name: str, state: AgentState, updates: dict[str, Any]) -> str:
         ]
         return f"Fused vector K=10/BM25 K=10; reranked top K=10; kept relevance >0.70. Selected: {updates.get('entities', {}).get('chemical')}; accepted: {brief}; rejected top scores: {[(item.get('chemical_name'), item.get('relevance_score')) for item in rejected]}."
     if name == "structured_retrieval":
-        return f"Applied exact SQL filters {updates.get('filters', {})}; result type: {updates.get('result_type', 'products')}; counts: {updates.get('counts', {})}; aggregates: {list(updates.get('aggregate', {}))}; evidence rows returned: {len(updates.get('evidence', []))}."
+        return f"Applied exact SQL filters {updates.get('filters', {})}; date predicate: {updates.get('sql_date_predicate') or 'none'}; result type: {updates.get('result_type', 'products')}; counts: {updates.get('counts', {})}; aggregates: {list(updates.get('aggregate', {}))}; evidence rows returned: {len(updates.get('evidence', []))}."
     if name == "evidence_builder":
         ids = [(row.get("CDPHId"), row.get("ChemicalId")) for row in updates.get("evidence", [])[:5]]
         return f"Validated {len(updates.get('evidence', []))} evidence rows; sample (CDPHId, ChemicalId): {ids}."
@@ -164,6 +164,8 @@ def ask(
         query_plan["semantic_candidates"] = result["semantic_candidates"]
     if result.get("semantic_rejected"):
         query_plan["semantic_rejected"] = result["semantic_rejected"]
+    if result.get("sql_date_predicate"):
+        query_plan["sql_date_predicate"] = result["sql_date_predicate"]
     return {
         "answer": result.get("answer", "No answer was produced."),
         "evidence": result.get("evidence", []),

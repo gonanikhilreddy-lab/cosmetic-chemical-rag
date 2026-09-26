@@ -50,6 +50,49 @@ class EndToEndTests(unittest.TestCase):
         self.assertGreater(second["summary"]["counts"]["product_count"], 0)
         self.assertTrue(all("CDPHId" in row and "ChemicalId" in row for row in second["evidence"]))
 
+    def test_standalone_question_does_not_inherit_previous_date(self):
+        first = ask("How many products containing titanium dioxide were reported in 2019?", use_local_model=False)
+        second = ask(
+            "How many unique companies have reported CAS number 13463-67-7?",
+            use_local_model=False,
+            conversation_context={"query_plan": first["query_plan"]},
+        )
+        self.assertEqual(second["query_plan"]["intent"], "company_count")
+        self.assertIsNone(second["query_plan"]["date_from"])
+        self.assertIsNone(second["query_plan"]["date_to"])
+        self.assertFalse(second["query_plan"]["inherited_date_constraint"])
+        self.assertNotIn("date_field", second["query_plan"]["filters"])
+
+    def test_explicit_follow_up_inherits_context_and_counts_products(self):
+        first = ask("Which products from New Avon LLC contain titanium dioxide?", use_local_model=False)
+        second = ask(
+            "How many of them were discontinued?",
+            use_local_model=False,
+            conversation_context={"query_plan": first["query_plan"]},
+        )
+        self.assertEqual(second["query_plan"]["intent"], "product_count")
+        self.assertEqual(second["query_plan"]["entities"]["company"], "New Avon LLC")
+        self.assertEqual(second["query_plan"]["entities"]["chemical"], "Titanium dioxide")
+        self.assertEqual(second["query_plan"]["filters"]["date_operator"], "exists")
+        self.assertEqual(second["result_type"], "products")
+
+    def test_follow_up_company_reference_keeps_chemical_scope(self):
+        first = ask("How many products contain acetaldehyde?", use_local_model=False)
+        second = ask(
+            "How many unique companies reported it?",
+            use_local_model=False,
+            conversation_context={"query_plan": first["query_plan"]},
+        )
+        third = ask(
+            "Which companies are they?",
+            use_local_model=False,
+            conversation_context={"query_plan": second["query_plan"]},
+        )
+        self.assertEqual(third["query_plan"]["context_reference"], "company")
+        self.assertEqual(third["query_plan"]["inherited_entities"]["chemical"], "Acetaldehyde")
+        self.assertEqual(third["query_plan"]["inherited_entities"]["cas"], "75-07-0")
+        self.assertEqual(third["result_type"], "companies")
+
     def test_out_of_scope_question_is_rejected(self):
         result = ask("What is 25 times 30?", use_local_model=False)
         self.assertIn("California cosmetic chemical disclosures", result["answer"])
@@ -128,12 +171,21 @@ class EndToEndTests(unittest.TestCase):
     def test_acetaldehyde_returns_distinct_company_aggregation(self):
         result = ask("How many products contain acetaldehyde, and which companies report it?", use_local_model=False)
         self.assertEqual(result["query_plan"]["entities"]["chemical"], "Acetaldehyde")
-        self.assertEqual(result["result_type"], "companies")
+        self.assertEqual(result["query_plan"]["entities"]["cas"], "75-07-0")
+        self.assertEqual(result["query_plan"]["output_targets"], ["product_count", "company_list"])
+        self.assertEqual(result["result_type"], "multi")
         self.assertGreater(result["summary"]["counts"]["product_count"], 0)
         companies = result["summary"]["aggregate"]["companies"]
         self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
         self.assertEqual(len({row["CompanyName"] for row in companies}), len(companies))
         self.assertFalse(result["evidence"])
+        self.assertIn("### Product count", result["answer"])
+        self.assertIn("**Distinct products:** 30", result["answer"])
+        self.assertIn("### Company count", result["answer"])
+        self.assertIn("**Distinct companies:** 8", result["answer"])
+        self.assertIn("### Reporting companies", result["answer"])
+        for company in companies:
+            self.assertIn(f"**{company['CompanyName']}**", result["answer"])
 
     def test_cas_company_question_returns_companies_not_products(self):
         result = ask("Which companies reported products containing CAS number 13463-67-7?", use_local_model=False)
@@ -145,6 +197,7 @@ class EndToEndTests(unittest.TestCase):
     def test_company_count_question_returns_distinct_count(self):
         result = ask("How many companies reported products containing CAS number 13463-67-7?", use_local_model=False)
         self.assertEqual(result["query_plan"]["intent"], "company_count")
+        self.assertEqual(result["query_plan"]["output_targets"], ["company_count"])
         self.assertEqual(result["result_type"], "companies")
         self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
         self.assertGreaterEqual(
@@ -152,6 +205,54 @@ class EndToEndTests(unittest.TestCase):
             len(result["summary"]["aggregate"]["companies"]),
         )
         self.assertFalse(result["evidence"])
+
+    def test_product_count_returns_count_only(self):
+        result = ask("How many products contain Titanium dioxide?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "product_count")
+        self.assertEqual(result["summary"]["counts"]["product_count"], 32010)
+        self.assertNotIn("### Matching products", result["answer"])
+
+    def test_multi_output_company_then_product_counts(self):
+        result = ask("How many companies report titanium dioxide, and how many products contain it?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "multi_output")
+        self.assertEqual(result["query_plan"]["output_targets"], ["company_count", "product_count"])
+        self.assertEqual(result["summary"]["aggregate"]["company_count"], 446)
+        self.assertEqual(result["summary"]["counts"]["product_count"], 31751)
+        self.assertEqual(result["summary"]["counts"]["ingredient_records"], 93133)
+        self.assertIn("**Distinct companies:** 446", result["answer"])
+        self.assertIn("**Distinct products:** 31,751", result["answer"])
+        self.assertIn("**Ingredient records:** 93,133", result["answer"])
+
+    def test_multi_output_product_then_company_counts(self):
+        result = ask("How many products contain titanium dioxide, and how many companies report it?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "multi_output")
+        self.assertEqual(result["query_plan"]["output_targets"], ["product_count", "company_count"])
+        self.assertEqual(result["summary"]["aggregate"]["company_count"], 446)
+        self.assertEqual(result["summary"]["counts"]["product_count"], 31751)
+
+    def test_chemical_count_returns_distinct_chemicals(self):
+        result = ask("How many chemicals are reported for ANEW EYELIFTING SERUM SHADOW-ALL SHADES?", use_local_model=False)
+        self.assertEqual(result["query_plan"]["intent"], "chemical_count")
+        self.assertEqual(result["summary"]["aggregate"]["chemical_count"], 2)
+        self.assertEqual(result["result_type"], "chemicals")
+
+    def test_complex_company_count_applies_category_and_date_filters(self):
+        result = ask("Among makeup products reported after 2019, how many unique companies reported titanium dioxide?", use_local_model=False)
+        filters = result["query_plan"]["filters"]
+        self.assertEqual(result["query_plan"]["intent"], "company_count")
+        self.assertEqual(filters["primary_category"], "Makeup Products (non-permanent)")
+        self.assertEqual((filters["date_operator"], filters["date_from"], filters["date_to"]), ("after", "2020-01-01", None))
+        self.assertGreater(result["summary"]["aggregate"]["company_count"], 0)
+
+    def test_discontinued_makeup_product_count_applies_all_filters(self):
+        result = ask("How many discontinued titanium dioxide makeup products were reported by New Avon LLC?", use_local_model=False)
+        filters = result["query_plan"]["filters"]
+        self.assertEqual(result["query_plan"]["intent"], "product_count")
+        self.assertEqual(filters["company_name"], "New Avon LLC")
+        self.assertEqual(filters["chemical_name"], "Titanium dioxide")
+        self.assertEqual(filters["primary_category"], "Makeup Products (non-permanent)")
+        self.assertEqual(filters["date_operator"], "exists")
+        self.assertGreater(result["summary"]["counts"]["product_count"], 0)
 
     def test_reported_after_uses_strict_lower_bound(self):
         result = ask("Find all products containing titanium dioxide that were reported after January 1, 2020.", use_local_model=False)
@@ -176,6 +277,19 @@ class EndToEndTests(unittest.TestCase):
         plan = result["query_plan"]
         self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("between", "2020-01-01", "2020-12-31"))
         self.assertTrue(all("2020-01-01" <= row["MostRecentDateReported"] <= "2020-12-31" for row in result["evidence"]))
+
+    def test_between_years_plan_and_sql_predicate_use_exclusive_next_year(self):
+        result = ask(
+            "How many unique companies from New Avon LLC reported products containing CAS 13463-67-7 between 2010 and 2012?",
+            use_local_model=False,
+        )
+        plan = result["query_plan"]
+        self.assertEqual((plan["date_from"], plan["date_to"], plan["date_operator"]), ("2010-01-01", "2013-01-01", "range"))
+        self.assertEqual(
+            plan["sql_date_predicate"],
+            "MostRecentDateReported IS NOT NULL AND MostRecentDateReported >= DATE '2010-01-01' AND MostRecentDateReported < DATE '2013-01-01'",
+        )
+        self.assertEqual(result["summary"]["aggregate"]["company_count"], 1)
 
     def test_execution_trace_has_latency_and_work_for_each_step(self):
         result = ask("Which products contain CAS 75-07-0?", limit=1, use_local_model=False)

@@ -69,6 +69,15 @@ class AnswerSynthesizerAgent:
                 f"Found {company_count:,} companies reporting {products:,} products "
                 f"across {records:,} ingredient records."
             )
+        if intent == "chemical_count":
+            return f"Found {aggregate.get('chemical_count', 0):,} distinct chemicals across {records:,} ingredient records."
+        if intent == "product_count":
+            return f"Found {products:,} distinct products across {records:,} ingredient records."
+        if state.get("result_type") == "multi":
+            return (
+                f"Found {products:,} distinct products across {records:,} ingredient records "
+                f"reported by {aggregate.get('company_count', 0):,} distinct companies."
+            )
         if intent == "compare" and aggregate.get("comparison"):
             return "; ".join(
                 f"{row['entity']}: {row['product_count']:,} products, {row['ingredient_records']:,} ingredient records"
@@ -127,6 +136,24 @@ class AnswerSynthesizerAgent:
 
     def _format_answer(self, summary_line: str, state: dict[str, Any]) -> str:
         lines = ["### Summary", summary_line]
+        if state.get("intent") in ("product_count", "chemical_count"):
+            return "\n".join(lines)
+        output_targets = set(state.get("query_plan", {}).get("output_targets", []))
+        if state.get("result_type") == "multi" or len(output_targets) > 1:
+            aggregate = state.get("aggregate", {})
+            counts = state.get("counts", {})
+            if "product_count" in output_targets:
+                lines.extend(["", "### Product count", f"- **Distinct products:** {counts.get('product_count', 0):,}"])
+            if "company_count" in output_targets or "company_list" in output_targets:
+                lines.extend(["", "### Company count", f"- **Distinct companies:** {aggregate.get('company_count', 0):,}"])
+            if "company_list" in output_targets:
+                lines.extend(["", "### Reporting companies"])
+                for company in aggregate.get("companies", []):
+                    lines.append(f"- **{self._display_text(company.get('CompanyName'))}**")
+            if "chemical_count" in output_targets:
+                lines.extend(["", "### Chemical count", f"- **Distinct chemicals:** {aggregate.get('chemical_count', 0):,}"])
+            lines.extend(["", "### Ingredient records", f"- **Ingredient records:** {counts.get('ingredient_records', 0):,}"])
+            return "\n".join(lines)
         if state.get("result_type") == "companies":
             companies = state.get("aggregate", {}).get("companies", [])
             if companies:

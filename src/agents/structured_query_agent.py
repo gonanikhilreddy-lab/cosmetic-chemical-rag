@@ -7,6 +7,7 @@ from src.tools.structured_query import (
     chemical_breakdown,
     company_breakdown,
     count_cosmetics,
+    date_predicate,
     date_coverage,
     dataset_statistics,
     search_cosmetics,
@@ -40,12 +41,29 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 class StructuredQueryAgent:
-    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, date_operator: str | None, limit: int) -> dict[str, Any]:
+    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, date_operator: str | None, output_targets: list[str], require_discontinued: bool, limit: int) -> dict[str, Any]:
         if intent == "data_quality":
             return {"counts": {}, "aggregate": {"dataset": dataset_statistics()}, "evidence": []}
         filters = {ENTITY_TO_FILTER[kind]: value for kind, value in entities.items() if kind in ENTITY_TO_FILTER}
         if date_field and (date_from or date_to or date_operator == "exists"):
             filters.update({"date_field": date_field, "date_from": date_from, "date_to": date_to, "date_operator": date_operator})
+        if require_discontinued and date_field != "discontinued":
+            filters["require_discontinued"] = True
+        sql_date_predicate = date_predicate(date_field, date_from, date_to, date_operator)
+
+        if "product_count" in output_targets and ("company_list" in output_targets or "company_count" in output_targets):
+            company_rows = company_breakdown(**filters)
+            return {
+                "counts": count_cosmetics(**filters),
+                "aggregate": {
+                    "companies": _records(company_rows.head(limit)),
+                    "company_count": len(company_rows),
+                },
+                "evidence": [],
+                "filters": filters,
+                "result_type": "multi",
+                "sql_date_predicate": sql_date_predicate,
+            }
 
         if intent in ("company_lookup", "company_count", "company_aggregation"):
             company_rows = company_breakdown(**filters)
@@ -57,6 +75,31 @@ class StructuredQueryAgent:
                 "evidence": [],
                 "filters": filters,
                 "result_type": "companies",
+                "sql_date_predicate": sql_date_predicate,
+            }
+
+        if intent == "chemical_count":
+            chemical_rows = chemical_breakdown(**filters)
+            return {
+                "counts": count_cosmetics(**filters),
+                "aggregate": {
+                    "chemicals": _records(chemical_rows.head(limit)),
+                    "chemical_count": len(chemical_rows),
+                },
+                "evidence": [],
+                "filters": filters,
+                "result_type": "chemicals",
+                "sql_date_predicate": sql_date_predicate,
+            }
+
+        if intent == "product_count":
+            return {
+                "counts": count_cosmetics(**filters),
+                "aggregate": {},
+                "evidence": [],
+                "filters": filters,
+                "result_type": "products",
+                "sql_date_predicate": sql_date_predicate,
             }
 
         if intent == "compare" and comparisons:
@@ -93,4 +136,4 @@ class StructuredQueryAgent:
             aggregate["trend"] = _records(trend)
         if intent == "summarize" or re.search(r"what chemicals|chemicals reported|which chemicals", question, re.IGNORECASE):
             aggregate["chemicals"] = _records(chemical_breakdown(**filters).head(limit))
-        return {"counts": counts, "aggregate": aggregate, "evidence": evidence, "filters": filters, "result_type": "products"}
+        return {"counts": counts, "aggregate": aggregate, "evidence": evidence, "filters": filters, "result_type": "products", "sql_date_predicate": sql_date_predicate}
