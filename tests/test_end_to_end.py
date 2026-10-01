@@ -212,23 +212,121 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(result["summary"]["counts"]["product_count"], 32010)
         self.assertNotIn("### Matching products", result["answer"])
 
+    def test_top_10_chemicals_uses_distinct_product_aggregation(self):
+        result = ask("What are the top 10 chemicals by number of products?", use_local_model=False)
+        plan = result["query_plan"]
+        aggregate = result["summary"]["aggregate"]
+        self.assertEqual((plan["intent"], plan["group_by"], plan["top_n"]), ("aggregation", "chemical", 10))
+        self.assertEqual((aggregate["group_count"], aggregate["returned_count"]), (123, 10))
+        self.assertEqual(aggregate["groups"][0]["group_value"], "Titanium dioxide")
+        self.assertEqual(aggregate["groups"][0]["product_count"], 32010)
+        self.assertIn("COUNT(DISTINCT CDPHId)", plan["aggregation_sql"])
+        self.assertIn("ORDER BY product_count DESC", plan["aggregation_sql"])
+        self.assertIn("LIMIT ?", plan["aggregation_sql"])
+        self.assertIn("32,010 products", result["answer"])
+
+    def test_companies_with_most_chemical_products_are_ranked(self):
+        result = ask(
+            "Which companies have the most products containing Titanium dioxide?",
+            use_local_model=False,
+        )
+        plan = result["query_plan"]
+        aggregate = result["summary"]["aggregate"]
+        self.assertEqual((plan["intent"], plan["group_by"], plan["aggregation_limit"]), ("aggregation", "company", 20))
+        self.assertEqual((aggregate["group_count"], aggregate["returned_count"]), (456, 20))
+        self.assertEqual(aggregate["groups"][0]["group_value"], "American International Industries")
+        self.assertEqual(aggregate["groups"][0]["product_count"], 1744)
+        self.assertTrue(all(
+            aggregate["groups"][index]["product_count"] >= aggregate["groups"][index + 1]["product_count"]
+            for index in range(len(aggregate["groups"]) - 1)
+        ))
+
+    def test_company_product_counts_are_grouped_and_default_limit_is_visible(self):
+        result = ask(
+            "Show the number of products containing Titanium dioxide for each company.",
+            use_local_model=False,
+        )
+        aggregate = result["summary"]["aggregate"]
+        self.assertEqual(result["result_type"], "aggregation")
+        self.assertEqual(aggregate["group_count"], 456)
+        self.assertEqual(aggregate["returned_count"], 20)
+        self.assertIn("top 20 of 456 companies", result["answer"])
+        self.assertFalse(result["evidence"])
+
+    def test_top_5_product_categories_are_ranked(self):
+        result = ask("What are the top 5 product categories by number of products?", use_local_model=False)
+        plan = result["query_plan"]
+        groups = result["summary"]["aggregate"]["groups"]
+        self.assertEqual((plan["group_by"], plan["top_n"]), ("category", 5))
+        self.assertEqual([row["product_count"] for row in groups], [18096, 6920, 5184, 2425, 1768])
+        self.assertEqual(groups[0]["group_value"], "Makeup Products (non-permanent)")
+
+    def test_grouped_aggregation_supports_lowest_product_counts(self):
+        result = ask("What are the top 5 chemicals by product count ascending?", use_local_model=False)
+        plan = result["query_plan"]
+        groups = result["summary"]["aggregate"]["groups"]
+        self.assertEqual((plan["group_by"], plan["order_direction"], plan["top_n"]), ("chemical", "asc", 5))
+        self.assertIn("ORDER BY product_count ASC", plan["aggregation_sql"])
+        self.assertTrue(all(
+            groups[index]["product_count"] <= groups[index + 1]["product_count"]
+            for index in range(len(groups) - 1)
+        ))
+        self.assertIn("Showing the lowest 5", result["answer"])
+
+    def test_tio2_uses_semantic_resolution_then_exact_duckdb_verification(self):
+        result = ask("Find products containing TiO2.", use_local_model=False)
+        plan = result["query_plan"]
+        candidate = plan["semantic_candidates"][0]
+        self.assertEqual(plan["retrieval_mode"], "hybrid")
+        self.assertEqual(plan["entities"]["chemical"], "Titanium dioxide")
+        self.assertGreater(candidate["relevance_score"], 0.70)
+        self.assertEqual(result["summary"]["counts"]["product_count"], 32010)
+
+    def test_ethyl_aldehyde_is_resolved_only_when_semantic_threshold_passes(self):
+        result = ask("Find products containing ethyl aldehyde.", use_local_model=False)
+        plan = result["query_plan"]
+        if result["confidence"] == "needs_clarification":
+            self.assertFalse(result["evidence"])
+            self.assertFalse(plan.get("filters"))
+        else:
+            self.assertEqual(plan["entities"]["chemical"], "Acetaldehyde")
+            self.assertGreater(plan["semantic_candidates"][0]["relevance_score"], 0.70)
+            self.assertEqual(result["summary"]["counts"]["product_count"], 30)
+
+    def test_dangerous_chemicals_is_not_mapped_to_a_specific_chemical(self):
+        result = ask("Find products with dangerous chemicals.", use_local_model=False)
+        self.assertEqual(result["confidence"], "needs_clarification")
+        self.assertFalse(result["evidence"])
+        self.assertNotIn("chemical_name", result["query_plan"].get("filters", {}))
+
+    def test_makeup_titanium_products_discontinued_filter_is_preserved(self):
+        result = ask(
+            "Find makeup products containing Titanium dioxide that were discontinued.",
+            use_local_model=False,
+        )
+        filters = result["query_plan"]["filters"]
+        self.assertEqual(result["summary"]["counts"], {"ingredient_records": 7326, "product_count": 2503})
+        self.assertEqual(filters["primary_category"], "Makeup Products (non-permanent)")
+        self.assertEqual(filters["date_operator"], "exists")
+        self.assertTrue(all(row["DiscontinuedDate"] is not None for row in result["evidence"]))
+
     def test_multi_output_company_then_product_counts(self):
         result = ask("How many companies report titanium dioxide, and how many products contain it?", use_local_model=False)
         self.assertEqual(result["query_plan"]["intent"], "multi_output")
         self.assertEqual(result["query_plan"]["output_targets"], ["company_count", "product_count"])
-        self.assertEqual(result["summary"]["aggregate"]["company_count"], 446)
-        self.assertEqual(result["summary"]["counts"]["product_count"], 31751)
-        self.assertEqual(result["summary"]["counts"]["ingredient_records"], 93133)
-        self.assertIn("**Distinct companies:** 446", result["answer"])
-        self.assertIn("**Distinct products:** 31,751", result["answer"])
-        self.assertIn("**Ingredient records:** 93,133", result["answer"])
+        self.assertEqual(result["summary"]["aggregate"]["company_count"], 456)
+        self.assertEqual(result["summary"]["counts"]["product_count"], 32010)
+        self.assertEqual(result["summary"]["counts"]["ingredient_records"], 93480)
+        self.assertIn("**Distinct companies:** 456", result["answer"])
+        self.assertIn("**Distinct products:** 32,010", result["answer"])
+        self.assertIn("**Ingredient records:** 93,480", result["answer"])
 
     def test_multi_output_product_then_company_counts(self):
         result = ask("How many products contain titanium dioxide, and how many companies report it?", use_local_model=False)
         self.assertEqual(result["query_plan"]["intent"], "multi_output")
         self.assertEqual(result["query_plan"]["output_targets"], ["product_count", "company_count"])
-        self.assertEqual(result["summary"]["aggregate"]["company_count"], 446)
-        self.assertEqual(result["summary"]["counts"]["product_count"], 31751)
+        self.assertEqual(result["summary"]["aggregate"]["company_count"], 456)
+        self.assertEqual(result["summary"]["counts"]["product_count"], 32010)
 
     def test_chemical_count_returns_distinct_chemicals(self):
         result = ask("How many chemicals are reported for ANEW EYELIFTING SERUM SHADOW-ALL SHADES?", use_local_model=False)
@@ -275,7 +373,7 @@ class EndToEndTests(unittest.TestCase):
     def test_reported_between_uses_inclusive_bounds(self):
         result = ask("Find all products containing titanium dioxide that were reported between January 1, 2020 and December 31, 2020.", use_local_model=False)
         plan = result["query_plan"]
-        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("between", "2020-01-01", "2020-12-31"))
+        self.assertEqual((plan["date_operator"], plan["date_from"], plan["date_to"]), ("range", "2020-01-01", "2021-01-01"))
         self.assertTrue(all("2020-01-01" <= row["MostRecentDateReported"] <= "2020-12-31" for row in result["evidence"]))
 
     def test_between_years_plan_and_sql_predicate_use_exclusive_next_year(self):

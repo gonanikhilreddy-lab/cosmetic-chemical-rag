@@ -71,6 +71,8 @@ def normalize_date_expression(question: str, date_field: str | None) -> Normaliz
             return NormalizedDate("after", f"{year + 1}-01-01", None, raw_expression)
         if re.search(r"\bbefore\b", text):
             return NormalizedDate("before", f"{year}-01-01", None, raw_expression)
+        if re.search(r"\bthrough\b", text):
+            return NormalizedDate("through", f"{year}-12-31", None, raw_expression)
         if re.search(r"\buntil\b", text):
             return NormalizedDate("range", None, f"{year + 1}-01-01", raw_expression)
         if re.search(r"\bfrom\b", text):

@@ -26,13 +26,45 @@ SAFETY_TERMS = (
     "safe for children",
     "breastfeeding",
 )
+GROUP_BY_PATTERNS = (
+    ("company", r"\bcompanies\b|\bcompany\b|\bmanufacturers?\b"),
+    ("chemical", r"\bchemicals?\b|\bingredients?\b"),
+    ("category", r"\b(?:product\s+)?categories\b|\bcategory\b"),
+    ("subcategory", r"\bsubcategories\b|\bsubcategory\b"),
+    ("brand", r"\bbrands?\b"),
+)
 
 
 class PlannerAgent:
     def plan(self, question: str) -> QueryPlan:
         text = question.lower()
+        group_by = next(
+            (field for field, pattern in GROUP_BY_PATTERNS if re.search(pattern, text)),
+            None,
+        )
+        top_match = re.search(r"\btop\s+(\d+)\b", text)
+        top_n = int(top_match.group(1)) if top_match else None
+        grouped_count = bool(
+            group_by
+            and re.search(r"\b(?:for each|per|by)\s+(?:the\s+)?(?:companies?|company|manufacturers?|chemicals?|ingredients?|categories|category|subcategories|subcategory|brands?)\b", text)
+            and re.search(r"\b(?:number|count|how many)\b", text)
+        )
+        ranked_groups = bool(
+            group_by
+            and (top_n is not None or re.search(r"\b(?:most|highest|largest|fewest|least|lowest|ascending|descending)\b", text))
+        )
+        aggregation_requested = grouped_count or ranked_groups
+        measure = (
+            "count_ingredient_records"
+            if aggregation_requested and re.search(r"\b(?:ingredient\s+)?records\b", text)
+            else "count_distinct_products"
+        )
+        order_by = "ingredient_records" if measure == "count_ingredient_records" else "product_count"
+        order_direction = "asc" if re.search(r"\b(?:fewest|least|lowest|ascending)\b", text) else "desc"
         if any(term in text for term in SAFETY_TERMS):
             intent = "safety_question"
+        elif aggregation_requested:
+            intent = "aggregation"
         elif re.search(r"\bhow many\b.*\bcompanies\b", text):
             intent = "company_count"
         elif re.search(r"\bhow many\b.*\bchemicals?\b", text):
@@ -79,7 +111,7 @@ class PlannerAgent:
             match = re.search(r"\b(?:which|what)\s+companies\b|\bcompanies\s+that\b", text)
             output_requests.append((match.start() if match else 0, "company_list"))
         output_targets = [target for _position, target in sorted(output_requests)]
-        if len(output_targets) > 1:
+        if len(output_targets) > 1 and not aggregation_requested:
             intent = "multi_output"
 
         has_reported_date_language = bool(
@@ -106,8 +138,13 @@ class PlannerAgent:
             date_to=date_to,
             date_operator=date_operator,
             aggregation_target=aggregation_target,
-            distinct=count_requested,
-            count=count_requested,
+            group_by=group_by if aggregation_requested else None,
+            measure=measure if aggregation_requested else None,
+            order_by=order_by if aggregation_requested else None,
+            order_direction=order_direction,
+            top_n=top_n,
+            distinct=count_requested or aggregation_requested,
+            count=count_requested or aggregation_requested,
             output_targets=output_targets,
             require_discontinued="discontinued" in text,
             retrieval_mode="structured",

@@ -10,6 +10,7 @@ from src.tools.structured_query import (
     date_predicate,
     date_coverage,
     dataset_statistics,
+    grouped_product_counts,
     search_cosmetics,
     reporting_trends,
 )
@@ -41,7 +42,7 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 class StructuredQueryAgent:
-    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, date_operator: str | None, output_targets: list[str], require_discontinued: bool, limit: int) -> dict[str, Any]:
+    def retrieve(self, question: str, intent: str, entities: dict[str, str], comparisons: dict[str, list[str]], date_field: str | None, date_from: str | None, date_to: str | None, date_operator: str | None, output_targets: list[str], require_discontinued: bool, limit: int, group_by: str | None = None, order_by: str | None = None, order_direction: str = "desc", top_n: int | None = None) -> dict[str, Any]:
         if intent == "data_quality":
             return {"counts": {}, "aggregate": {"dataset": dataset_statistics()}, "evidence": []}
         filters = {ENTITY_TO_FILTER[kind]: value for kind, value in entities.items() if kind in ENTITY_TO_FILTER}
@@ -50,6 +51,37 @@ class StructuredQueryAgent:
         if require_discontinued and date_field != "discontinued":
             filters["require_discontinued"] = True
         sql_date_predicate = date_predicate(date_field, date_from, date_to, date_operator)
+
+        if intent == "aggregation" and group_by:
+            effective_limit = top_n or limit
+            order_column = order_by or "product_count"
+            groups, aggregation_sql = grouped_product_counts(
+                group_by=group_by,
+                order_by=order_column,
+                order_direction=order_direction,
+                limit=effective_limit,
+                **filters,
+            )
+            total_group_count = int(groups["total_groups"].iloc[0]) if not groups.empty else 0
+            group_records = _records(groups.drop(columns=["total_groups"]))
+            return {
+                "counts": {},
+                "aggregate": {
+                    "groups": group_records,
+                    "group_by": group_by,
+                    "group_count": total_group_count,
+                    "returned_count": len(groups),
+                    "measure": order_column,
+                    "order_direction": order_direction,
+                    "limit": effective_limit,
+                },
+                "evidence": [],
+                "filters": filters,
+                "result_type": "aggregation",
+                "aggregation_sql": aggregation_sql,
+                "aggregation_limit": effective_limit,
+                "sql_date_predicate": sql_date_predicate,
+            }
 
         if "product_count" in output_targets and ("company_list" in output_targets or "company_count" in output_targets):
             company_rows = company_breakdown(**filters)

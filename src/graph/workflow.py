@@ -47,6 +47,13 @@ def _step_details(name: str, state: AgentState, updates: dict[str, Any]) -> str:
         ]
         return f"Fused vector K=10/BM25 K=10; reranked top K=10; kept relevance >0.70. Selected: {updates.get('entities', {}).get('chemical')}; accepted: {brief}; rejected top scores: {[(item.get('chemical_name'), item.get('relevance_score')) for item in rejected]}."
     if name == "structured_retrieval":
+        if updates.get("result_type") == "aggregation":
+            aggregate = updates.get("aggregate", {})
+            return (
+                f"Grouped by {aggregate.get('group_by')}; ordered by {aggregate.get('measure')} "
+                f"{aggregate.get('order_direction')}; limit {aggregate.get('limit')}; "
+                f"groups returned: {aggregate.get('returned_count', 0)} of {aggregate.get('group_count', 0)}."
+            )
         return f"Applied exact SQL filters {updates.get('filters', {})}; date predicate: {updates.get('sql_date_predicate') or 'none'}; result type: {updates.get('result_type', 'products')}; counts: {updates.get('counts', {})}; aggregates: {list(updates.get('aggregate', {}))}; evidence rows returned: {len(updates.get('evidence', []))}."
     if name == "evidence_builder":
         ids = [(row.get("CDPHId"), row.get("ChemicalId")) for row in updates.get("evidence", [])[:5]]
@@ -166,6 +173,10 @@ def ask(
         query_plan["semantic_rejected"] = result["semantic_rejected"]
     if result.get("sql_date_predicate"):
         query_plan["sql_date_predicate"] = result["sql_date_predicate"]
+    if result.get("aggregation_sql"):
+        query_plan["aggregation_sql"] = result["aggregation_sql"]
+    if result.get("aggregation_limit"):
+        query_plan["aggregation_limit"] = result["aggregation_limit"]
     return {
         "answer": result.get("answer", "No answer was produced."),
         "evidence": result.get("evidence", []),

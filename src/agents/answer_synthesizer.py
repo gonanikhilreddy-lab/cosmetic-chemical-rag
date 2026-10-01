@@ -47,6 +47,22 @@ class AnswerSynthesizerAgent:
         aggregate = state.get("aggregate", {})
         records = counts.get("ingredient_records", 0)
         products = counts.get("product_count", 0)
+        if state.get("result_type") == "aggregation":
+            group_labels = {
+                "company": "companies",
+                "brand": "brands",
+                "chemical": "chemicals",
+                "category": "product categories",
+                "subcategory": "product subcategories",
+            }
+            group_name = group_labels.get(aggregate.get("group_by"), "groups")
+            measure_label = "ingredient records" if aggregate.get("measure") == "ingredient_records" else "distinct products"
+            returned = aggregate.get("returned_count", 0)
+            total = aggregate.get("group_count", 0)
+            rank_label = "top" if aggregate.get("order_direction") == "desc" else "lowest"
+            if returned < total:
+                return f"Showing the {rank_label} {returned} of {total} {group_name} by {measure_label}."
+            return f"Found {total} {group_name} ranked by {measure_label}."
         if intent == "data_quality":
             stats = aggregate["dataset"]
             return (
@@ -136,6 +152,23 @@ class AnswerSynthesizerAgent:
 
     def _format_answer(self, summary_line: str, state: dict[str, Any]) -> str:
         lines = ["### Summary", summary_line]
+        if state.get("result_type") == "aggregation":
+            aggregate = state.get("aggregate", {})
+            group_labels = {
+                "company": "Companies",
+                "brand": "Brands",
+                "chemical": "Chemicals",
+                "category": "Product categories",
+                "subcategory": "Product subcategories",
+            }
+            label = group_labels.get(aggregate.get("group_by"), "Groups")
+            measure = aggregate.get("measure", "product_count")
+            unit = "ingredient records" if measure == "ingredient_records" else "products"
+            lines.extend(["", f"### {label}"])
+            for index, group in enumerate(aggregate.get("groups", []), start=1):
+                value = self._display_text(group.get("group_value")) or "Unlabeled"
+                lines.append(f"{index}. **{value}**: {group.get(measure, 0):,} {unit}")
+            return "\n".join(lines)
         if state.get("intent") in ("product_count", "chemical_count"):
             return "\n".join(lines)
         output_targets = set(state.get("query_plan", {}).get("output_targets", []))

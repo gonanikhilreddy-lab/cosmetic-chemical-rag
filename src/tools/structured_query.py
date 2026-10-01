@@ -39,6 +39,14 @@ ENTITY_COLUMNS = {
     "category": "PrimaryCategory",
     "subcategory": "SubCategory",
 }
+GROUP_COLUMNS = {
+    "company": "CompanyName",
+    "brand": "BrandName",
+    "chemical": "ChemicalName",
+    "category": "PrimaryCategory",
+    "subcategory": "SubCategory",
+}
+GROUP_ORDER_COLUMNS = {"product_count", "ingredient_records"}
 
 
 def _as_date(value: date | str | None) -> date | None:
@@ -393,6 +401,48 @@ def company_breakdown(**filters: Any):
         connection.close()
 
 
+def grouped_product_counts(
+    *,
+    group_by: str,
+    order_by: str = "product_count",
+    order_direction: str = "desc",
+    limit: int = 20,
+    **filters: Any,
+):
+    """Return distinct product and ingredient-record counts for an allowed dimension."""
+    if group_by not in GROUP_COLUMNS:
+        raise ValueError(f"Unsupported group_by {group_by!r}; choose from: {', '.join(GROUP_COLUMNS)}")
+    if order_by not in GROUP_ORDER_COLUMNS:
+        raise ValueError(f"Unsupported order_by {order_by!r}; choose from: {', '.join(sorted(GROUP_ORDER_COLUMNS))}")
+    if order_direction not in ("asc", "desc"):
+        raise ValueError("order_direction must be 'asc' or 'desc'")
+    if limit < 1:
+        raise ValueError("limit must be a positive integer")
+
+    column = GROUP_COLUMNS[group_by]
+    group_expression = f"TRIM({column})"
+    conditions, parameters = _filters(**filters)
+    conditions.append(f"{column} IS NOT NULL AND TRIM({column}) <> ''")
+    where_clause = " AND ".join(conditions)
+    query = f"""
+        SELECT {group_expression} AS group_value,
+               COUNT(DISTINCT CDPHId) AS product_count,
+             COUNT(*) AS ingredient_records,
+             COUNT(*) OVER () AS total_groups
+        FROM cosmetics
+        WHERE {where_clause}
+        GROUP BY {group_expression}
+        ORDER BY {order_by} {order_direction.upper()}, group_value ASC
+        LIMIT ?
+    """
+    parameters.append(limit)
+    connection = duckdb.connect(str(DB_FILE), read_only=True)
+    try:
+        return connection.execute(query, parameters).fetchdf(), query
+    finally:
+        connection.close()
+
+
 def dataset_statistics() -> dict[str, Any]:
     query = """
         SELECT COUNT(*) AS ingredient_records,
@@ -443,5 +493,5 @@ __all__ = [
     "find_by_brand", "find_by_product", "find_by_category", "find_by_date",
     "find_discontinued_between", "reporting_trends", "entity_values", "count_cosmetics",
     "chemical_breakdown", "cas_values_for_chemical", "date_predicate", "dataset_statistics",
-    "company_breakdown",
+    "company_breakdown", "grouped_product_counts",
 ]

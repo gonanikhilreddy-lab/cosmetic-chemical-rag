@@ -32,3 +32,5 @@ class AgentState(TypedDict, total=False):
     confidence: str
     result_type: str
     sql_date_predicate: str | None
+    aggregation_sql: str | None
+    aggregation_limit: int | None

@@ -22,9 +22,33 @@ class AgentTests(unittest.TestCase):
         self.assertEqual((after.date_operator, after.date_from, after.date_to), ("after", "2020-01-01", None))
         self.assertEqual((before.date_operator, before.date_from, before.date_to), ("before", "2020-01-01", None))
         self.assertEqual((during.date_operator, during.date_from, during.date_to), ("range", "2020-01-01", "2021-01-01"))
-        self.assertEqual((between.date_operator, between.date_from, between.date_to), ("between", "2020-01-01", "2020-12-31"))
+        self.assertEqual((between.date_operator, between.date_from, between.date_to), ("range", "2020-01-01", "2021-01-01"))
         self.assertEqual((from_year.date_operator, from_year.date_from, from_year.date_to), ("from", "2019-01-01", None))
         self.assertEqual((through_year.date_operator, through_year.date_from, through_year.date_to), ("through", "2019-12-31", None))
+
+    def test_planner_creates_grouped_aggregation_plans(self):
+        cases = (
+            ("What are the top 10 chemicals by number of products?", "chemical", 10),
+            ("Which companies have the most products containing Titanium dioxide?", "company", None),
+            ("Show the number of products containing Titanium dioxide for each company.", "company", None),
+            ("What are the top 5 product categories by number of products?", "category", 5),
+        )
+        for question, group_by, top_n in cases:
+            with self.subTest(question=question):
+                plan = PlannerAgent().plan(question)
+                self.assertEqual(plan.intent, "aggregation")
+                self.assertEqual(plan.group_by, group_by)
+                self.assertEqual(plan.measure, "count_distinct_products")
+                self.assertEqual(plan.order_by, "product_count")
+                self.assertEqual(plan.order_direction, "desc")
+                self.assertEqual(plan.top_n, top_n)
+
+    def test_simple_product_count_and_ambiguous_safety_language_are_not_aggregations(self):
+        count = PlannerAgent().plan("How many products contain Titanium dioxide?")
+        ambiguous = PlannerAgent().plan("Find products with dangerous chemicals.")
+        self.assertEqual(count.intent, "product_count")
+        self.assertIsNone(count.group_by)
+        self.assertNotEqual(ambiguous.intent, "aggregation")
 
     def test_entity_extractor_resolves_exact_cas(self):
         question = "Which products contain CAS 75-07-0?"

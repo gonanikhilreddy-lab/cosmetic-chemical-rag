@@ -121,6 +121,7 @@ def semantic_retrieval_node(state: AgentState) -> dict[str, Any]:
 
 
 def structured_retrieval_node(state: AgentState) -> dict[str, Any]:
+    plan = QueryPlan.model_validate(state["query_plan"])
     results = structured_retriever.retrieve(
         question=state["question"],
         intent=state["intent"],
@@ -130,9 +131,13 @@ def structured_retrieval_node(state: AgentState) -> dict[str, Any]:
         date_from=state.get("date_from"),
         date_to=state.get("date_to"),
         date_operator=state.get("date_operator"),
-        output_targets=QueryPlan.model_validate(state["query_plan"]).output_targets,
-        require_discontinued=QueryPlan.model_validate(state["query_plan"]).require_discontinued,
+        output_targets=plan.output_targets,
+        require_discontinued=plan.require_discontinued,
         limit=state.get("limit", 20),
+        group_by=plan.group_by,
+        order_by=plan.order_by,
+        order_direction=plan.order_direction,
+        top_n=plan.top_n,
     )
     return {
         **results,
